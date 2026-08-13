@@ -1,5 +1,5 @@
 #==============================================================================
-# ▼ Blesstama - Before/After Evals v0.15
+# ▼ Blesstama - Before/After Evals v1 (looks good enough for that)
 # -----------------------------------------------------------------------------
 # Actor/Class/Item/Skill/Weapon/Enemy/State Notetags:
 # These notetags go in the X notebox in the database.
@@ -58,6 +58,17 @@
 # 6)turn end aka after all actions was performed
 # 7)battle end, happens once in, well, end (win lose or escape, not matter)
 # keep in mind that options 1-3 works only on state note itself, while 4-7 follows normal rules
+#<frame: x>
+# COMMAND
+#</frame>
+#<frame: x, x, x, x...>
+# COMMAND
+#</frame>
+#this one...complicated and funny
+#same stuff as for before/after eval but...triggers based on skill animation
+#keep in mind that if you want for example land specific hits during animation, original repeats
+#will still happen so maybe need do shit like <before before eval>item.repeats=0</before before eval>
+#if you want just animation hits as example.
 #le examples:
 # <Before Eval>
 # return if !self.result.hit?
@@ -101,7 +112,22 @@
 # BattleManager.force_action(user)
 #</battle start>
 #at start of any battle user will execute skill 996 unless he is dead.
-
+#
+#<frame: 2>
+# SceneManager.scene.invoke_item(b,item)
+#</frame>
+#<frame: 18>
+#  #item.damage.formula = "a.atk * 40 - b.def * 20"
+#  user.add_buffs(2,4,2)
+#  SceneManager.scene.refresh_status
+#</frame>
+#<frame: 33>
+# SceneManager.scene.invoke_item(b,item)
+# item.damage.formula = "a.atk * 20 - b.def * 10"
+#</frame>
+#at second frame hit enemy, on 18th one change skill formula, add 2 atk buffs to actor
+#and refresh battle status to show it, and on 33th one deal damage to enemy again and
+#revert damage formula back to original one
 # -----------------------------------------------------------------------------
 class Scene_Battle < Scene_Base
   alias :pre_item :use_item
@@ -134,10 +160,51 @@ class Scene_Battle < Scene_Base
   def eval_command(user, item, formula, b=self, p=$game_party, s=$game_switches, t=$game_troop, v=$game_variables)
     eval(formula)
   rescue Exception => e
-    puts "Error in Before/After Eval: #{e.message}"
+    puts "Error in Before/After Eval of use item: #{e.message}"
   end
 end
 
+class Sprite_Battler < Sprite_Base
+  alias stockaniminit initialize
+  def initialize(viewport, battler = nil)
+    stockaniminit(viewport, battler)
+    @animcode = []
+  end
+  alias stockanimstart start_animation
+  def start_animation(animation, mirror = false)
+    stockanimstart(animation, mirror = false)
+    regex = /<frame:\s*(.*?)\s*>([\s\S]*?)<\/frame>/im
+    user = SceneManager.scene.instance_variable_get(:@subject)
+    item = user.current_action.item
+    item.note.scan(regex) do |match|
+      ids = match[0].strip.split(",")
+      ids.each do |id|
+        @animcode << [id, match[1]]
+      end
+    end
+  end
+  alias stockanimupdate update_animation
+  def update_animation
+    stockanimupdate
+    return unless animation?
+    regex = /<frame:\s*([^>]+)?>([\s\S]*?)<\/frame>/im
+    user = SceneManager.scene.instance_variable_get(:@subject)
+    item = user.current_action.item
+    frame_index = @animation.frame_max
+    frame_index -= (@ani_duration + @ani_rate - 1) / @ani_rate
+    @animcode.each do |match|
+      if match[0].to_i == frame_index
+        @animcode.delete_at(0)
+        eval_command(user, item, match[1])
+      end
+    end
+  end
+  def eval_command(user, item, formula, b=@battler, p=$game_party, s=$game_switches, t=$game_troop, v=$game_variables)
+    eval(formula)
+  rescue Exception => e
+    puts "Error in Animation Timings Eval: #{e.message}"
+  end
+end
 
 module BattleManager
   
@@ -211,7 +278,6 @@ class Game_Battler < Game_BattlerBase
   def update_state_turns
     regexp = /<state update>(.*?)<\/state update>/im
     states.each do |state|
-      puts "state id: #{state.id}"
       statehandle(self, state.id, regexp)
     end
     base_turnupdate
@@ -226,7 +292,6 @@ class Game_Battler < Game_BattlerBase
 
   def statehandle(user, state_id, regexp)
     $data_states[state_id].note.scan(regexp).each do |code|
-      puts "triggered"
       eval_command(user, $data_states[state_id], code.first)
     end
   end
@@ -250,7 +315,7 @@ class Game_Battler < Game_BattlerBase
   def eval_command(user, item, formula, b=self, p=$game_party, s=$game_switches, t=$game_troop, v=$game_variables)
     eval(formula)
   rescue Exception => e
-    puts "Error in Before/After Eval: #{e.message}"
+    puts "Error in Before/After Eval for turns/battle/states: #{e.message}"
   end
 
 end

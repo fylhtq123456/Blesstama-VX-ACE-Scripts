@@ -182,6 +182,7 @@ class Sprite_Battler < Sprite_Base
         @animcode << [id, match[1]]
       end
     end
+    rescue
   end
   alias stockanimupdate update_animation
   def update_animation
@@ -198,6 +199,7 @@ class Sprite_Battler < Sprite_Base
         eval_command(user, item, match[1])
       end
     end
+    rescue
   end
   def eval_command(user, item, formula, b=@battler, p=$game_party, s=$game_switches, t=$game_troop, v=$game_variables)
     eval(formula)

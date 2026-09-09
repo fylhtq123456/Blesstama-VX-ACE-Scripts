@@ -1,5 +1,5 @@
 #==============================================================================
-# ▼ Blesstama - Before/After Evals v1 (looks good enough for that)
+# ▼ Blesstama - Before/After Evals v1.1 (looks good enough for that)
 # -----------------------------------------------------------------------------
 # Actor/Class/Item/Skill/Weapon/Enemy/State Notetags:
 # These notetags go in the X notebox in the database.
@@ -20,6 +20,7 @@
 # after item has did own thing where the COMMAND is any valid ruby thing.
 # You can use the following variables in your command:
 #     user - the current enemy/actor
+#     self/b - target of the skill/item
 #     item - skill/item that was used
 #     p - game party
 #     t - game troop
@@ -28,6 +29,17 @@
 # Keep in mind that before^2 and after^2 variation triggers only once +
 # you are uncapable of using self/b for it, while before/after evals
 # repeated as much times as much skill hits + you can use self/b.
+#<Before Eval React>
+# COMMAND
+#</Before Eval React>
+#<After Eval React>
+# COMMAND
+#</After Eval React>
+# Basically previous instances expect user and self is flipped, so:
+# user - enemy/actor that, well, reacts to skill/item
+# self - enemy/actor that uses item
+# keep in mind that in before code results not exists so using stuff like
+# "return if b.result.hp_damage == 0" is pointless cus it's always 0 in before version
 # <state apply>
 #    COMMAND
 # </state apply>
@@ -98,6 +110,13 @@
 # </Before Eval>
 # if currently used item has more or equal 3, give 2 tp per it, else 5
 
+#<After Eval React>
+# return if user.hp == 0 || user.state?(1)
+# user.hp = user.mhp
+#</After Eval React>
+# if you didn't killed enemy by dealing damage that equal/above his max hp
+# he will fully outregen it
+
 #<state update>
 # s = [2,3,6]
 # 2.times do
@@ -165,11 +184,13 @@ class Scene_Battle < Scene_Base
 end
 
 class Sprite_Battler < Sprite_Base
+  
   alias stockaniminit initialize
   def initialize(viewport, battler = nil)
     stockaniminit(viewport, battler)
     @animcode = []
   end
+  
   alias stockanimstart start_animation
   def start_animation(animation, mirror = false)
     stockanimstart(animation, mirror = false)
@@ -183,7 +204,8 @@ class Sprite_Battler < Sprite_Base
       end
     end
     rescue
-  end
+    end
+    
   alias stockanimupdate update_animation
   def update_animation
     stockanimupdate
@@ -264,9 +286,13 @@ class Game_Battler < Game_BattlerBase
   def item_apply(user, item)
     regexp = /<Before Eval>(.*?)<\/Before Eval>/im
     itemevals(user, item, regexp)
+    regexp = /<Before Eval React>(.*?)<\/Before Eval React>/im
+    itemevals2(user, item, regexp)
     itemsapplied(user, item)
     regexp = /<After Eval>(.*?)<\/After Eval>/im
     itemevals(user, item, regexp)
+    regexp = /<After Eval React>(.*?)<\/After Eval React>/im
+    itemevals2(user, item, regexp)
   end
   
   alias base_addstate add_state
@@ -307,13 +333,18 @@ class Game_Battler < Game_BattlerBase
     end
   end
   
+  def itemevals2(user, item, regexp)
+    self.get_all_notes.scan(regexp).each do |code|
+      user.eval_command(self, item, code.first)
+    end
+  end
+
   def turnhandle(user, regexp)
     user.get_all_notes.scan(regexp).each do |code|
       eval_command(user, item = nil, code.first)
     end
   end
   
-
   def eval_command(user, item, formula, b=self, p=$game_party, s=$game_switches, t=$game_troop, v=$game_variables)
     eval(formula)
   rescue Exception => e
